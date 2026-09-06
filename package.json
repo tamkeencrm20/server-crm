@@ -10,6 +10,7 @@
     "start": "node src/index.js",
     "seed": "node seed/seed.js",
     "seed:reset": "node seed/seed.js --reset",
+    "seed:admin": "node seed/create-admin.js",
     "test:e2e": "node tests/e2e.mjs"
   },
   "engines": {

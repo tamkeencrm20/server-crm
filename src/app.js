@@ -6,6 +6,7 @@ import compression from 'compression';
 import rateLimit from 'express-rate-limit';
 
 import env from './config/env.js';
+import logger from './utils/logger.js';
 import { notFoundHandler, errorHandler } from './middleware/error.js';
 
 import authRoutes from './modules/auth/auth.routes.js';
@@ -30,7 +31,13 @@ export function createApp() {
       origin(origin, cb) {
         // Same-origin and server-to-server calls arrive without an Origin.
         if (!origin || env.corsOrigins.includes(origin)) return cb(null, true);
-        return cb(new Error(`Origin ${origin} is not allowed`));
+
+        // Refuse by withholding the CORS headers, never by throwing: an error
+        // raised here reaches the error handler and turns a rejected preflight
+        // into a 500, which reads like the server is broken rather than like a
+        // misconfigured CORS_ORIGINS. The browser still blocks the request.
+        logger.warn(`Blocked cross-origin request from ${origin} — add it to CORS_ORIGINS if this is expected`);
+        return cb(null, false);
       },
       credentials: true,
     }),

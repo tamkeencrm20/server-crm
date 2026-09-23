@@ -12,7 +12,8 @@
     "seed:reset": "node seed/seed.js --reset",
     "seed:admin": "node seed/create-admin.js",
     "test:e2e": "node tests/e2e.mjs",
-    "test:features": "node tests/features.mjs"
+    "test:features": "node tests/features.mjs",
+    "seed:demo": "node seed/demo.js"
   },
   "engines": {
     "node": ">=20"

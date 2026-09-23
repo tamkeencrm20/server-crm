@@ -4,8 +4,9 @@ import env from '../../config/env.js';
 import logger from '../../utils/logger.js';
 import Lead from '../../models/Lead.js';
 import Branch from '../../models/Branch.js';
-import { authenticate, requireAdmin } from '../../middleware/auth.js';
+import { authenticate, requireMediaBuyer } from '../../middleware/auth.js';
 import { validate } from '../../middleware/validate.js';
+import { leadScopeFilter } from '../../middleware/scope.js';
 import { asyncHandler, badRequest } from '../../utils/errors.js';
 import {
   verifySignature,
@@ -116,11 +117,14 @@ router.use(authenticate);
 /** Is the Meta integration actually wired up? Shown on the settings screen. */
 router.get(
   '/status',
-  requireAdmin,
-  asyncHandler(async (_req, res) => {
+  requireMediaBuyer,
+  asyncHandler(async (req, res) => {
+    // Scoped like every other list, so a branch's media buyer sees that
+    // branch's traffic rather than the whole company's.
+    const filter = { 'meta.network': 'meta', ...leadScopeFilter(req.user) };
     const [totalFromMeta, last] = await Promise.all([
-      Lead.countDocuments({ 'meta.leadgenId': { $ne: null } }),
-      Lead.findOne({ 'meta.leadgenId': { $ne: null } }).sort({ createdAt: -1 }).select('createdAt meta.formName'),
+      Lead.countDocuments(filter),
+      Lead.findOne(filter).sort({ createdAt: -1 }).select('createdAt meta.formName'),
     ]);
 
     res.json({
@@ -144,7 +148,7 @@ router.get(
  */
 router.post(
   '/leads/:leadgenId/sync',
-  requireAdmin,
+  requireMediaBuyer,
   asyncHandler(async (req, res) => {
     const graphLead = await fetchLeadFromGraph(req.params.leadgenId);
     if (!graphLead) throw badRequest('Could not fetch that lead from Meta, check the page access token');
@@ -172,7 +176,7 @@ const simulateSchema = z.object({
 
 router.post(
   '/simulate-lead',
-  requireAdmin,
+  requireMediaBuyer,
   validate(simulateSchema),
   asyncHandler(async (req, res) => {
     if (env.isProd) throw badRequest('Lead simulation is disabled in production');
@@ -193,7 +197,8 @@ router.post(
         branch: branch?._id,
         source: req.body.platform === 'ig' ? 'meta_instagram' : 'meta_facebook',
         meta: {
-          leadgenId: `sim_${Date.now()}`,
+          network: 'meta',
+          leadgenId: `meta:sim_${Date.now()}`,
           formName: 'Simulated form',
           platform: req.body.platform,
           createdTime: new Date(),

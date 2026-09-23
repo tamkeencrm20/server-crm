@@ -210,7 +210,7 @@ export async function getBranchPerformance(scope, range) {
 
 /** Which campaigns and courses are actually producing enrolments. */
 export async function getSourceBreakdown(scope, range) {
-  const [bySource, byCourse, byCampaign] = await Promise.all([
+  const [bySource, byCourse, byCampaign, byPlatform] = await Promise.all([
     Lead.aggregate([
       { $match: rangeMatch(scope, range.start, range.end) },
       {
@@ -243,17 +243,53 @@ export async function getSourceBreakdown(scope, range) {
       { $match: { ...rangeMatch(scope, range.start, range.end), 'meta.campaignName': { $ne: null } } },
       {
         $group: {
-          _id: '$meta.campaignName',
+          // Campaign names repeat across networks, so the network is part of
+          // the key — otherwise a TikTok and a Meta campaign sharing a name
+          // would be reported as one line.
+          _id: { campaign: '$meta.campaignName', network: '$meta.network' },
           leads: { $sum: 1 },
           enrolled: { $sum: { $cond: [{ $eq: ['$status', LEAD_STATUS.ENROLLED] }, 1, 0] } },
+          revenue: { $sum: { $ifNull: ['$dealValue', 0] } },
         },
       },
       { $sort: { leads: -1 } },
-      { $limit: 10 },
+      { $limit: 12 },
+      {
+        $project: {
+          _id: '$_id.campaign',
+          network: '$_id.network',
+          leads: 1,
+          enrolled: 1,
+          revenue: 1,
+        },
+      },
+    ]),
+
+    // Network-level totals: the media buyer's headline question is which of the
+    // three platforms is actually converting, not just delivering volume.
+    Lead.aggregate([
+      { $match: { ...rangeMatch(scope, range.start, range.end), 'meta.network': { $ne: null } } },
+      {
+        $group: {
+          _id: '$meta.network',
+          leads: { $sum: 1 },
+          contacted: { $sum: { $cond: [{ $ne: ['$firstContactedAt', null] }, 1, 0] } },
+          enrolled: { $sum: { $cond: [{ $eq: ['$status', LEAD_STATUS.ENROLLED] }, 1, 0] } },
+          revenue: { $sum: { $ifNull: ['$dealValue', 0] } },
+        },
+      },
+      { $sort: { leads: -1 } },
+      {
+        $addFields: {
+          conversionRate: {
+            $cond: [{ $gt: ['$leads', 0] }, { $round: [{ $multiply: [{ $divide: ['$enrolled', '$leads'] }, 100] }, 1] }, 0],
+          },
+        },
+      },
     ]),
   ]);
 
-  return { bySource, byCourse, byCampaign };
+  return { bySource, byCourse, byCampaign, byPlatform };
 }
 
 /** Live team state for the "who is on shift" strip. */

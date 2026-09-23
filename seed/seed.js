@@ -1,6 +1,7 @@
 /**
  * Seeds a working Tamkeen CRM: the two live branches, a realistic course list
- * taken from tamkeentraining.com, and one admin / two team leaders / five
+ * taken from tamkeentraining.com, and one admin / two team leaders / two
+ * media buyers / five
  * agents so round-robin distribution can be exercised straight away.
  *
  *   npm run seed          add anything missing, leave existing data alone
@@ -57,6 +58,11 @@ const TEAM = [
 
   { name: 'Khalid Al Marzooqi', email: 'khalid.leader@tamkeentraining.com', role: ROLES.TEAM_LEADER, branch: 'ajman' },
   { name: 'Sara Al Hosani', email: 'sara.leader@tamkeentraining.com', role: ROLES.TEAM_LEADER, branch: 'dubai' },
+
+  // One media buyer per branch: they run that branch's Meta, TikTok and
+  // Snapchat campaigns and read its whole pipeline to judge traffic quality.
+  { name: 'Hassan Al Suwaidi', email: 'hassan.media@tamkeentraining.com', role: ROLES.MEDIA_BUYER, branch: 'ajman' },
+  { name: 'Mariam Al Blooshi', email: 'mariam.media@tamkeentraining.com', role: ROLES.MEDIA_BUYER, branch: 'dubai' },
 
   { name: 'Ahmed Mansour', email: 'ahmed.agent@tamkeentraining.com', role: ROLES.AGENT, branch: 'ajman' },
   { name: 'Fatima Al Zaabi', email: 'fatima.agent@tamkeentraining.com', role: ROLES.AGENT, branch: 'ajman' },

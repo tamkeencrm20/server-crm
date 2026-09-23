@@ -17,6 +17,10 @@ import leadRoutes from './modules/leads/leads.routes.js';
 import notificationRoutes from './modules/notifications/notifications.routes.js';
 import dashboardRoutes from './modules/dashboard/dashboard.routes.js';
 import metaRoutes from './modules/meta/meta.routes.js';
+import { tiktokRouter, snapchatRouter } from './modules/platforms/index.js';
+
+/** Paths whose raw request body must be kept for HMAC verification. */
+const WEBHOOK_PATHS = ['/api/meta/webhook', '/api/tiktok/webhook', '/api/snapchat/webhook'];
 
 export function createApp() {
   const app = express();
@@ -43,13 +47,13 @@ export function createApp() {
     }),
   );
 
-  // The Meta webhook signature is computed over the exact bytes sent, so the
-  // raw body has to survive JSON parsing.
   app.use(
     express.json({
       limit: '1mb',
       verify(req, _res, buf) {
-        if (req.originalUrl.startsWith('/api/meta/webhook')) req.rawBody = buf;
+        // Every ad network signs the exact bytes it sent, so the raw body has
+        // to survive JSON parsing for each webhook path.
+        if (WEBHOOK_PATHS.some((p) => req.originalUrl.startsWith(p))) req.rawBody = buf;
       },
     }),
   );
@@ -90,6 +94,8 @@ export function createApp() {
   app.use('/api/notifications', notificationRoutes);
   app.use('/api/dashboard', dashboardRoutes);
   app.use('/api/meta', metaRoutes);
+  app.use('/api/tiktok', tiktokRouter);
+  app.use('/api/snapchat', snapchatRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

@@ -4,7 +4,7 @@ import User from '../../models/User.js';
 import { authenticate, requireAdmin, requireLeader } from '../../middleware/auth.js';
 import { validate, q } from '../../middleware/validate.js';
 import { userScopeFilter } from '../../middleware/scope.js';
-import { ROLES, ROLE_VALUES, ROLE_RANK } from '../../config/constants.js';
+import { ROLES, ROLE_VALUES, BRANCH_BOUND_ROLES } from '../../config/constants.js';
 import { asyncHandler, notFound, forbidden, badRequest } from '../../utils/errors.js';
 import { revokeAllSessions } from '../auth/auth.service.js';
 import { recalculateAgentLoads } from '../../services/distribution.service.js';
@@ -43,13 +43,18 @@ const updateSchema = createSchema
     isAvailable: z.boolean().optional(),
   });
 
-/** A team leader may only touch people inside their own branch, and never an admin. */
+/**
+ * A team leader may only touch sales agents inside their own branch.
+ *
+ * Checked by exact role rather than by rank: a media buyer outranks nobody on
+ * the sales team but is not part of it either, so a branch's team leader has
+ * no business disabling the person who runs its ad accounts.
+ */
 function assertCanManage(actor, target) {
   if (actor.role === ROLES.ADMIN) return;
   if (actor.role !== ROLES.TEAM_LEADER) throw forbidden('You cannot manage other users');
-  if (ROLE_RANK[target.role] >= ROLE_RANK[ROLES.TEAM_LEADER]) {
-    throw forbidden('Team leaders can only manage sales agents');
-  }
+  if (target.role !== ROLES.AGENT) throw forbidden('Team leaders can only manage sales agents');
+
   const own = String(actor.branch?._id ?? actor.branch);
   if (String(target.branch) !== own) throw forbidden('This user belongs to another branch');
 }
@@ -134,8 +139,8 @@ router.post(
       fields.branch = String(req.user.branch?._id ?? req.user.branch);
     }
 
-    if (fields.role !== ROLES.ADMIN && !fields.branch) {
-      throw badRequest('A branch is required for team leaders and sales agents');
+    if (BRANCH_BOUND_ROLES.includes(fields.role) && !fields.branch) {
+      throw badRequest('A branch is required for every role except admin');
     }
     if (fields.role === ROLES.ADMIN) delete fields.branch;
 

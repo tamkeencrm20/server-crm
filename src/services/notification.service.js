@@ -44,6 +44,23 @@ export function notifyLeadAssigned(agentId, lead) {
   });
 }
 
+/**
+ * One message covering a whole imported batch. A 500-row upload would otherwise
+ * ring an agent's bell 500 times, which trains people to ignore the bell.
+ */
+export function notifyLeadsImported(agentId, count, uploaderName) {
+  return notify({
+    user: agentId,
+    type: NOTIFICATION_TYPE.LEAD_ASSIGNED,
+    title: { ar: 'عملاء جدد من ملف مستورد', en: 'New leads from an import' },
+    body: {
+      ar: `تم إسناد ${count} عميلاً إليك من ملف رفعه ${uploaderName}`,
+      en: `${count} leads were assigned to you from a file uploaded by ${uploaderName}`,
+    },
+    link: '/leads?assignedTo=me&source=import',
+  });
+}
+
 export function notifyFollowUpDue(agentId, lead) {
   return notify({
     user: agentId,

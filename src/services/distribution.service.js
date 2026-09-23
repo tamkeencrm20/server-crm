@@ -152,7 +152,7 @@ async function recordFailure(lead, failureReason, extra = {}) {
  * @param {boolean} [options.force] reassign even if already owned
  * @returns {Promise<{assigned: boolean, agent?: object, reason: string}>}
  */
-export async function assignLead(lead, { force = false } = {}) {
+export async function assignLead(lead, { force = false, notify = true } = {}) {
   if (lead.assignedTo && !force) {
     return { assigned: false, reason: 'Lead already has an owner' };
   }
@@ -238,7 +238,9 @@ export async function assignLead(lead, { force = false } = {}) {
     ),
   ]);
 
-  notifyLeadAssigned(pick.agent._id, lead);
+  // A bulk import turns this off and sends one summary per agent instead of
+  // one alert per row.
+  if (notify) notifyLeadAssigned(pick.agent._id, lead);
   emitTo([room.branch(String(branchId)), room.admins()], 'lead:assigned', {
     leadId: String(lead._id),
     agentId: String(pick.agent._id),

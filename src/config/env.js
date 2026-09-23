@@ -23,6 +23,18 @@ const schema = z.object({
   META_PAGE_ACCESS_TOKEN: z.string().optional(),
   META_GRAPH_VERSION: z.string().default('v21.0'),
 
+  // TikTok Lead Generation — optional until the Business account is wired up.
+  TIKTOK_APP_SECRET: z.string().optional(),
+  TIKTOK_VERIFY_TOKEN: z.string().optional(),
+  TIKTOK_ACCESS_TOKEN: z.string().optional(),
+  TIKTOK_API_VERSION: z.string().default('v1.3'),
+
+  // Snapchat Lead Generation — optional until the Ads account is wired up.
+  SNAPCHAT_APP_SECRET: z.string().optional(),
+  SNAPCHAT_VERIFY_TOKEN: z.string().optional(),
+  SNAPCHAT_ACCESS_TOKEN: z.string().optional(),
+  SNAPCHAT_API_VERSION: z.string().default('v1'),
+
   // A lead arriving again within this window is treated as a duplicate.
   LEAD_DEDUPE_WINDOW_DAYS: z.coerce.number().int().nonnegative().default(30),
   // A "new" lead untouched for this long raises a stale alert.
@@ -50,6 +62,8 @@ export const env = Object.freeze({
   isDev: raw.NODE_ENV === 'development',
   corsOrigins: raw.CORS_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean),
   metaConfigured: Boolean(raw.META_APP_SECRET && raw.META_VERIFY_TOKEN),
+  tiktokConfigured: Boolean(raw.TIKTOK_APP_SECRET && raw.TIKTOK_VERIFY_TOKEN),
+  snapchatConfigured: Boolean(raw.SNAPCHAT_APP_SECRET && raw.SNAPCHAT_VERIFY_TOKEN),
 });
 
 export default env;

@@ -3,9 +3,9 @@ import { z } from 'zod';
 import Lead from '../../models/Lead.js';
 import Activity from '../../models/Activity.js';
 import Assignment from '../../models/Assignment.js';
-import { authenticate, requireLeader } from '../../middleware/auth.js';
+import { authenticate, requireLeader, requireBranchInsight } from '../../middleware/auth.js';
 import { validate, q } from '../../middleware/validate.js';
-import { leadScopeFilter, canAccessLead, assertCanAssignWithin } from '../../middleware/scope.js';
+import { leadScopeFilter, canAccessLead, canModifyLead, assertCanAssignWithin } from '../../middleware/scope.js';
 import {
   ACTIVITY_TYPE_VALUES,
   ACTIVITY_TYPE,
@@ -18,6 +18,7 @@ import {
 } from '../../config/constants.js';
 import { asyncHandler, notFound, forbidden, badRequest } from '../../utils/errors.js';
 import { intakeLead, changeLeadStatus, logContact } from '../../services/lead.service.js';
+import { importLeads } from '../../services/import.service.js';
 import { reassignLead, distributeUnassigned, assignLead } from '../../services/distribution.service.js';
 
 const router = Router();
@@ -34,6 +35,20 @@ async function loadLead(req) {
 
   if (!lead) throw notFound('Lead not found');
   if (!canAccessLead(req.user, lead)) throw forbidden('You do not have access to this lead');
+  return lead;
+}
+
+/**
+ * Same lookup, but for routes that change the record. Reading and writing are
+ * separate permissions: a media buyer sees the whole branch pipeline and may
+ * not touch any of it, so every mutating route must load through this instead
+ * of loadLead.
+ */
+async function loadLeadForWrite(req) {
+  const lead = await loadLead(req);
+  if (!canModifyLead(req.user, lead)) {
+    throw forbidden('Your role can view this lead but not change it', { code: 'READ_ONLY_ROLE' });
+  }
   return lead;
 }
 
@@ -186,10 +201,34 @@ router.get(
   }),
 );
 
-/** Why this lead landed where it did — leaders and admins only. */
+/**
+ * Bulk import from a spreadsheet. Open to every role — what changes is where
+ * the leads land, which the service decides from the caller's role rather than
+ * from anything the browser sends.
+ */
+const importSchema = z.object({
+  rows: z.array(z.record(z.any())).min(1),
+  branch: z.string().optional(),
+  dryRun: z.boolean().optional(),
+});
+
+router.post(
+  '/import',
+  validate(importSchema),
+  asyncHandler(async (req, res) => {
+    const result = await importLeads(req.body.rows, {
+      user: req.user,
+      branch: req.body.branch,
+      dryRun: req.body.dryRun === true,
+    });
+    res.status(result.dryRun ? 200 : 201).json({ success: true, data: result });
+  }),
+);
+
+/** Why this lead landed where it did. Read-only, so media buyers see it too. */
 router.get(
   '/:id/assignments',
-  requireLeader,
+  requireBranchInsight,
   asyncHandler(async (req, res) => {
     const lead = await loadLead(req);
     const history = await Assignment.find({ lead: lead._id })
@@ -271,7 +310,7 @@ router.patch(
   '/:id',
   validate(updateSchema),
   asyncHandler(async (req, res) => {
-    const lead = await loadLead(req);
+    const lead = await loadLeadForWrite(req);
 
     // Moving a lead between branches is a routing decision, not data entry.
     if (req.body.branch && req.user.role !== ROLES.ADMIN) {
@@ -302,7 +341,7 @@ router.patch(
   '/:id/status',
   validate(statusSchema),
   asyncHandler(async (req, res) => {
-    const lead = await loadLead(req);
+    const lead = await loadLeadForWrite(req);
     const { status, ...extra } = req.body;
     const updated = await changeLeadStatus(lead, status, req.user, extra);
     res.json({ success: true, data: updated });
@@ -325,7 +364,7 @@ router.post(
   '/:id/activities',
   validate(activitySchema),
   asyncHandler(async (req, res) => {
-    const lead = await loadLead(req);
+    const lead = await loadLeadForWrite(req);
 
     // These two are written by the system, never posted by a client.
     if ([ACTIVITY_TYPE.STATUS_CHANGE, ACTIVITY_TYPE.ASSIGNMENT].includes(req.body.type)) {

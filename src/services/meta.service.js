@@ -3,7 +3,7 @@ import env from '../config/env.js';
 import logger from '../utils/logger.js';
 import Branch from '../models/Branch.js';
 import Course from '../models/Course.js';
-import { LEAD_SOURCE } from '../config/constants.js';
+import { AD_PLATFORM, LEAD_SOURCE } from '../config/constants.js';
 
 /**
  * Everything that touches the Meta Lead Ads platform.
@@ -215,6 +215,7 @@ export async function mapGraphLeadToDraft(graphLead, envelope = {}) {
     branch: branch?._id,
     source,
     meta: {
+      network: AD_PLATFORM.META,
       leadgenId: String(graphLead.id ?? envelope.leadgenId),
       formId: graphLead.form_id ?? envelope.formId,
       formName: envelope.formName,

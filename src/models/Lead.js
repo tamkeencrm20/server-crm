@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import {
+  AD_PLATFORM_VALUES,
   LEAD_STATUS,
   LEAD_STATUS_VALUES,
   LEAD_SOURCE,
@@ -35,8 +36,19 @@ const leadSchema = new mongoose.Schema(
 
     // --- Origin -------------------------------------------------------
     source: { type: String, enum: LEAD_SOURCE_VALUES, default: LEAD_SOURCE.MANUAL, index: true },
+
+    /**
+     * Ad attribution. Named `meta` from when Meta was the only integration; it
+     * now carries TikTok and Snapchat too, distinguished by `network`. The name
+     * stayed so existing records and the campaign reports keep working — read
+     * it as "marketing metadata", not "Meta the company".
+     */
     meta: {
-      // Meta's own lead id — the strongest duplicate guard we have.
+      // Which ad network delivered this lead.
+      network: { type: String, enum: AD_PLATFORM_VALUES, index: true },
+      // The platform's own lead id — the strongest duplicate guard we have.
+      // Unique across all networks, which is safe because each one issues ids
+      // in its own namespace and we never mint these ourselves.
       leadgenId: { type: String, index: { unique: true, sparse: true } },
       formId: String,
       formName: String,
@@ -48,7 +60,8 @@ const leadSchema = new mongoose.Schema(
       campaignName: String,
       adsetId: String,
       adsetName: String,
-      platform: String, // 'fb' | 'ig'
+      // Sub-network inside the platform: 'fb' | 'ig' for Meta, unset elsewhere.
+      platform: String,
       createdTime: Date,
       // Everything Meta sent, verbatim, for audit and for fields we do not
       // model yet. Never rendered to the browser unfiltered.

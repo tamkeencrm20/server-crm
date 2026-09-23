@@ -57,4 +57,15 @@ export function requireMinRole(minRole) {
 }
 
 export const requireAdmin = requireRole(ROLES.ADMIN);
+
+/** Ownership and team management: team leaders and admins only. */
 export const requireLeader = requireMinRole(ROLES.TEAM_LEADER);
+
+/**
+ * Branch-wide reporting: adds media buyers, who need the same numbers a team
+ * leader sees in order to judge which campaigns are worth the spend.
+ */
+export const requireBranchInsight = requireMinRole(ROLES.MEDIA_BUYER);
+
+/** Ad-platform configuration: the media buyer's own domain, plus admins. */
+export const requireMediaBuyer = requireRole(ROLES.MEDIA_BUYER, ROLES.ADMIN);

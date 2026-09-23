@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { authenticate, requireLeader } from '../../middleware/auth.js';
+import { authenticate, requireBranchInsight } from '../../middleware/auth.js';
 import { validate, q } from '../../middleware/validate.js';
 import { leadScopeFilter } from '../../middleware/scope.js';
 import { ROLES } from '../../config/constants.js';
@@ -54,7 +54,7 @@ router.get(
 /** Agent leaderboard — a leader sees their branch, an admin sees everyone. */
 router.get(
   '/agents',
-  requireLeader,
+  requireBranchInsight,
   validate(rangeSchema, 'query'),
   asyncHandler(async (req, res) => {
     const p = q(req);
@@ -78,7 +78,7 @@ router.get(
 
 router.get(
   '/sources',
-  requireLeader,
+  requireBranchInsight,
   validate(rangeSchema, 'query'),
   asyncHandler(async (req, res) => {
     const p = q(req);
@@ -89,7 +89,7 @@ router.get(
 
 router.get(
   '/team-status',
-  requireLeader,
+  requireBranchInsight,
   asyncHandler(async (req, res) => {
     const branchFilter =
       req.user.role === ROLES.ADMIN ? {} : { branch: req.user.branch?._id ?? req.user.branch };

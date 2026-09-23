@@ -1,40 +1,32 @@
 import mongoose from 'mongoose';
-import { ROLES } from '../config/constants.js';
+import { ROLES, BRANCH_WIDE_ROLES } from '../config/constants.js';
 import { forbidden } from '../utils/errors.js';
+
+/** True for roles whose visibility is their whole branch. */
+const isBranchWide = (role) => BRANCH_WIDE_ROLES.includes(role);
 
 /**
  * Data visibility rules, in one place:
  *
  *   admin        -> every branch, every lead
  *   team_leader  -> their own branch only
+ *   media_buyer  -> their own branch only, read-only
  *   agent        -> only leads assigned to them
  *
  * Every list endpoint merges `leadScopeFilter(user)` into its query, so a
  * missing permission check cannot leak another branch's pipeline.
  */
 export function leadScopeFilter(user) {
-  switch (user.role) {
-    case ROLES.ADMIN:
-      return {};
-    case ROLES.TEAM_LEADER:
-      return { branch: user.branch?._id ?? user.branch };
-    case ROLES.AGENT:
-    default:
-      return { assignedTo: user._id };
-  }
+  if (user.role === ROLES.ADMIN) return {};
+  if (isBranchWide(user.role)) return { branch: user.branch?._id ?? user.branch };
+  return { assignedTo: user._id };
 }
 
 /** Same idea for the user directory. */
 export function userScopeFilter(user) {
-  switch (user.role) {
-    case ROLES.ADMIN:
-      return {};
-    case ROLES.TEAM_LEADER:
-      return { branch: user.branch?._id ?? user.branch };
-    case ROLES.AGENT:
-    default:
-      return { _id: user._id };
-  }
+  if (user.role === ROLES.ADMIN) return {};
+  if (isBranchWide(user.role)) return { branch: user.branch?._id ?? user.branch };
+  return { _id: user._id };
 }
 
 const idOf = (v) => (v && v._id ? String(v._id) : v ? String(v) : null);
@@ -42,12 +34,20 @@ const idOf = (v) => (v && v._id ? String(v._id) : v ? String(v) : null);
 /** True when `user` is allowed to open this particular lead. */
 export function canAccessLead(user, lead) {
   if (user.role === ROLES.ADMIN) return true;
-  if (user.role === ROLES.TEAM_LEADER) return idOf(lead.branch) === idOf(user.branch);
+  if (isBranchWide(user.role)) return idOf(lead.branch) === idOf(user.branch);
   return idOf(lead.assignedTo) === String(user._id);
 }
 
-/** True when `user` may change this lead (status, notes, reassignment). */
+/**
+ * True when `user` may change this lead (status, notes, follow-up dates).
+ *
+ * Reading and writing part ways here: a media buyer sees every lead in the
+ * branch so they can judge campaign quality, but the pipeline is the sales
+ * team's record of its own work — letting the person who bought the traffic
+ * also mark it "enrolled" would make the conversion numbers self-reported.
+ */
 export function canModifyLead(user, lead) {
+  if (user.role === ROLES.MEDIA_BUYER) return false;
   return canAccessLead(user, lead);
 }
 

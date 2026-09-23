@@ -55,7 +55,7 @@ export async function findDuplicate({ phone, metaLeadgenId }) {
  *   the webhook wants a quiet no-op so Meta stops retrying.
  * @returns {Promise<{lead, duplicate: boolean, assignment: object|null}>}
  */
-export async function intakeLead(draft, { autoAssign = true, createdBy, throwOnDuplicate = false } = {}) {
+export async function intakeLead(draft, { autoAssign = true, createdBy, throwOnDuplicate = false, notify = true } = {}) {
   const existing = await findDuplicate({
     phone: draft.phone,
     metaLeadgenId: draft.meta?.leadgenId,
@@ -97,7 +97,7 @@ export async function intakeLead(draft, { autoAssign = true, createdBy, throwOnD
 
   let assignment = null;
   if (autoAssign) {
-    assignment = await assignLead(lead);
+    assignment = await assignLead(lead, { notify });
   }
 
   emitTo([room.branch(String(lead.branch)), room.admins()], 'lead:created', {

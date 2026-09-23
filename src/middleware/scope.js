@@ -22,9 +22,21 @@ export function leadScopeFilter(user) {
   return { assignedTo: user._id };
 }
 
-/** Same idea for the user directory. */
+/**
+ * Same idea for the user directory, with one extra rule.
+ *
+ * A team leader runs the sales team, not the branch's marketing. The media
+ * buyer reports to the administration, so they are filtered out of a leader's
+ * directory entirely rather than merely being read-only there — a row with no
+ * working controls just invites the question of why it is shown at all.
+ */
 export function userScopeFilter(user) {
   if (user.role === ROLES.ADMIN) return {};
+
+  if (user.role === ROLES.TEAM_LEADER) {
+    return { branch: user.branch?._id ?? user.branch, role: { $ne: ROLES.MEDIA_BUYER } };
+  }
+
   if (isBranchWide(user.role)) return { branch: user.branch?._id ?? user.branch };
   return { _id: user._id };
 }

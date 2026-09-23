@@ -330,6 +330,67 @@ const run = async () => {
   check('an oversized sheet is refused', huge.status === 400, `status ${huge.status}`);
 
   // =========================================================================
+  section('Media buyer is invisible to a team leader');
+  // =========================================================================
+
+  const leaderTeam = await call(leader.accessToken, 'GET', '/users?limit=50');
+  const buyersSeen = (leaderTeam.body?.data ?? []).filter((u) => u.role === 'media_buyer');
+  check('a team leader does not see media buyers at all', buyersSeen.length === 0, `${buyersSeen.length} visible`);
+
+  // The scope must survive a caller-supplied role filter.
+  const leaderProbe = await call(leader.accessToken, 'GET', '/users?role=media_buyer&limit=50');
+  check('?role=media_buyer cannot bypass the scope', (leaderProbe.body?.data ?? []).length === 0, `${leaderProbe.body?.data?.length} leaked`);
+
+  const leaderAgents = await call(leader.accessToken, 'GET', '/users?role=agent&limit=50');
+  check('a normal role filter still works for a leader', (leaderAgents.body?.data ?? []).length > 0, 'no agents returned');
+
+  const buyerById = await call(leader.accessToken, 'GET', `/users/${buyerId}`);
+  check('a team leader cannot open the media buyer by id', buyerById.status === 404, `status ${buyerById.status}`);
+
+  const adminSeesBuyers = await call(admin.accessToken, 'GET', '/users?role=media_buyer&limit=50');
+  check('an admin still sees media buyers', (adminSeesBuyers.body?.data ?? []).length === 2, `${adminSeesBuyers.body?.data?.length} found`);
+
+  // =========================================================================
+  section('Spreadsheet export — per role');
+  // =========================================================================
+
+  const exportAs = async (tok, query = '') => call(tok.accessToken, 'GET', `/leads/export${query}`);
+
+  const adminExport = await exportAs(admin);
+  check('admin can export', adminExport.ok, `status ${adminExport.status}`);
+  check('admin export has a column list', Array.isArray(adminExport.body?.data?.columns) && adminExport.body.data.columns.length > 10, JSON.stringify(adminExport.body?.data?.columns?.length));
+
+  const leaderExport = await exportAs(leader);
+  check('team leader can export', leaderExport.ok, `status ${leaderExport.status}`);
+  const leaderBranches = new Set((leaderExport.body?.data?.rows ?? []).map((r) => r.branch));
+  check('leader export is one branch only', leaderBranches.size <= 1, `branches: ${[...leaderBranches].join(', ')}`);
+
+  const agentExport = await exportAs(agent);
+  check('agent can export', agentExport.ok, `status ${agentExport.status}`);
+  const agentOwnersInFile = new Set((agentExport.body?.data?.rows ?? []).map((r) => r.assignedTo));
+  check('agent export contains only their own leads', agentOwnersInFile.size <= 1, `owners: ${[...agentOwnersInFile].join(', ')}`);
+  check('agent export is smaller than the admin one', (agentExport.body?.data?.total ?? 0) < (adminExport.body?.data?.total ?? 0), `${agentExport.body?.data?.total} vs ${adminExport.body?.data?.total}`);
+
+  const buyerExport = await exportAs(buyer);
+  check('media buyer can export what it can read', buyerExport.ok, `status ${buyerExport.status}`);
+
+  // Filters must reach the file, not just the screen.
+  const filteredExport = await exportAs(admin, '?status=new');
+  const statuses = new Set((filteredExport.body?.data?.rows ?? []).map((r) => r.status));
+  check('export honours the status filter', statuses.size === 1 && statuses.has('new'), `statuses: ${[...statuses].join(',')}`);
+  check('the filtered export is smaller than the full one', filteredExport.body.data.total < adminExport.body.data.total, `${filteredExport.body.data.total} vs ${adminExport.body.data.total}`);
+
+  // The row shape the workbook builder depends on.
+  const sample = adminExport.body?.data?.rows?.[0] ?? {};
+  check('rows carry a readable phone', /^\+/.test(sample.phone ?? ''), sample.phone);
+  for (const field of ['fullName', 'status', 'source', 'branch', 'assignedTo', 'createdAt']) {
+    check(`rows carry ${field}`, field in sample, `missing from ${Object.keys(sample).join(',')}`);
+  }
+
+  // /export must not be swallowed by the /:id route.
+  check('the export route is not read as a lead id', adminExport.body?.error?.code !== 'INVALID_ID', JSON.stringify(adminExport.body?.error));
+
+  // =========================================================================
   section('Regressions — the original behaviour still holds');
   // =========================================================================
 

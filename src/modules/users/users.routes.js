@@ -67,8 +67,14 @@ router.get(
   asyncHandler(async (req, res) => {
     const { role, branch, isActive, isAvailable, search, page, limit } = q(req);
 
-    const filter = { ...userScopeFilter(req.user) };
-    if (role) filter.role = role;
+    const scope = userScopeFilter(req.user);
+    const filter = { ...scope };
+
+    // A requested role still has to satisfy the scope's own role rule, so the
+    // two are combined. Assigning straight to filter.role would let
+    // `?role=media_buyer` overwrite a team leader's scope and reveal exactly
+    // the people that scope exists to hide.
+    if (role) filter.role = scope.role ? { $eq: role, ...scope.role } : role;
     if (branch && req.user.role === ROLES.ADMIN) filter.branch = branch;
     if (isActive) filter.isActive = isActive === 'true';
     if (isAvailable) filter.isAvailable = isAvailable === 'true';

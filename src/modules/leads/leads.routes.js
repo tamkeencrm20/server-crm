@@ -19,6 +19,7 @@ import {
 import { asyncHandler, notFound, forbidden, badRequest } from '../../utils/errors.js';
 import { intakeLead, changeLeadStatus, logContact } from '../../services/lead.service.js';
 import { importLeads } from '../../services/import.service.js';
+import { buildLeadExport, EXPORT_COLUMNS, EXPORT_MAX_ROWS } from '../../services/export.service.js';
 import { reassignLead, distributeUnassigned, assignLead } from '../../services/distribution.service.js';
 
 const router = Router();
@@ -79,53 +80,64 @@ const SORTS = {
   followup: { nextFollowUpAt: 1 },
 };
 
+/**
+ * Translate the list query into a Lead filter, already narrowed by the caller's
+ * scope. Shared with the export route so a filtered screen and the file it
+ * produces can never disagree about what the filter meant.
+ */
+function buildLeadFilter(req, p) {
+  const filter = { ...leadScopeFilter(req.user), isDuplicate: false };
+
+  if (p.status) filter.status = Array.isArray(p.status) ? { $in: p.status } : p.status;
+  if (p.source) filter.source = p.source;
+  if (p.course) filter.course = p.course;
+
+  // Admins may narrow to a branch; everyone else is already narrowed by scope.
+  if (p.branch && req.user.role === ROLES.ADMIN) filter.branch = p.branch;
+
+  if (p.assignedTo) {
+    if (p.assignedTo === 'unassigned') {
+      if (req.user.role === ROLES.AGENT) throw forbidden('Agents cannot browse the unassigned queue');
+      filter.assignedTo = null;
+    } else if (p.assignedTo === 'me') {
+      filter.assignedTo = req.user._id;
+    } else if (req.user.role !== ROLES.AGENT) {
+      filter.assignedTo = p.assignedTo;
+    }
+  }
+
+  if (p.open === 'true') filter.status = { $nin: TERMINAL_STATUSES };
+  if (p.open === 'false') filter.status = { $in: TERMINAL_STATUSES };
+
+  if (p.followUpDue === 'true') {
+    filter.nextFollowUpAt = { $ne: null, $lte: new Date() };
+    filter.status = { $nin: TERMINAL_STATUSES };
+  }
+
+  if (p.from || p.to) {
+    filter.createdAt = {};
+    if (p.from) filter.createdAt.$gte = p.from;
+    if (p.to) filter.createdAt.$lte = p.to;
+  }
+
+  if (p.search) {
+    filter.$or = [
+      { fullName: { $regex: p.search, $options: 'i' } },
+      { phone: { $regex: p.search.replace(/\D/g, ''), $options: 'i' } },
+      { email: { $regex: p.search, $options: 'i' } },
+      { courseRaw: { $regex: p.search, $options: 'i' } },
+    ];
+  }
+
+  return filter;
+}
+
 router.get(
   '/',
   validate(listQuerySchema, 'query'),
   asyncHandler(async (req, res) => {
     const p = q(req);
-    const filter = { ...leadScopeFilter(req.user), isDuplicate: false };
-
-    if (p.status) filter.status = Array.isArray(p.status) ? { $in: p.status } : p.status;
-    if (p.source) filter.source = p.source;
-    if (p.course) filter.course = p.course;
-
-    // Admins may narrow to a branch; everyone else is already narrowed by scope.
-    if (p.branch && req.user.role === ROLES.ADMIN) filter.branch = p.branch;
-
-    if (p.assignedTo) {
-      if (p.assignedTo === 'unassigned') {
-        if (req.user.role === ROLES.AGENT) throw forbidden('Agents cannot browse the unassigned queue');
-        filter.assignedTo = null;
-      } else if (p.assignedTo === 'me') {
-        filter.assignedTo = req.user._id;
-      } else if (req.user.role !== ROLES.AGENT) {
-        filter.assignedTo = p.assignedTo;
-      }
-    }
-
-    if (p.open === 'true') filter.status = { $nin: TERMINAL_STATUSES };
-    if (p.open === 'false') filter.status = { $in: TERMINAL_STATUSES };
-
-    if (p.followUpDue === 'true') {
-      filter.nextFollowUpAt = { $ne: null, $lte: new Date() };
-      filter.status = { $nin: TERMINAL_STATUSES };
-    }
-
-    if (p.from || p.to) {
-      filter.createdAt = {};
-      if (p.from) filter.createdAt.$gte = p.from;
-      if (p.to) filter.createdAt.$lte = p.to;
-    }
-
-    if (p.search) {
-      filter.$or = [
-        { fullName: { $regex: p.search, $options: 'i' } },
-        { phone: { $regex: p.search.replace(/\D/g, ''), $options: 'i' } },
-        { email: { $regex: p.search, $options: 'i' } },
-        { courseRaw: { $regex: p.search, $options: 'i' } },
-      ];
-    }
+    const filter = buildLeadFilter(req, p);
 
     const [items, total] = await Promise.all([
       Lead.find(filter)
@@ -187,20 +199,6 @@ router.get(
 // Read one
 // ---------------------------------------------------------------------------
 
-router.get(
-  '/:id',
-  asyncHandler(async (req, res) => {
-    const lead = await loadLead(req);
-    const activities = await Activity.find({ lead: lead._id })
-      .populate('actor', 'name role')
-      .populate('fromUser toUser', 'name')
-      .sort({ createdAt: -1 })
-      .limit(200);
-
-    res.json({ success: true, data: { lead, activities } });
-  }),
-);
-
 /**
  * Bulk import from a spreadsheet. Open to every role — what changes is where
  * the leads land, which the service decides from the caller's role rather than
@@ -224,6 +222,43 @@ router.post(
     res.status(result.dryRun ? 200 : 201).json({ success: true, data: result });
   }),
 );
+
+/**
+ * Export the current view to a spreadsheet.
+ *
+ * Every role may export; what comes out is whatever that role can already see,
+ * narrowed further by the same filters the screen was showing. The server
+ * returns rows and the browser writes the workbook, so the column headings come
+ * out in the language the person is using.
+ */
+router.get(
+  '/export',
+  validate(listQuerySchema, 'query'),
+  asyncHandler(async (req, res) => {
+    const filter = buildLeadFilter(req, q(req));
+    const rows = await buildLeadExport(req.user, filter);
+
+    res.json({
+      success: true,
+      data: { rows, columns: EXPORT_COLUMNS, total: rows.length, truncated: rows.length >= EXPORT_MAX_ROWS },
+    });
+  }),
+);
+
+router.get(
+  '/:id',
+  asyncHandler(async (req, res) => {
+    const lead = await loadLead(req);
+    const activities = await Activity.find({ lead: lead._id })
+      .populate('actor', 'name role')
+      .populate('fromUser toUser', 'name')
+      .sort({ createdAt: -1 })
+      .limit(200);
+
+    res.json({ success: true, data: { lead, activities } });
+  }),
+);
+
 
 /** Why this lead landed where it did. Read-only, so media buyers see it too. */
 router.get(

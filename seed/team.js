@@ -5,6 +5,7 @@
  *   TEAM_PASSWORD='...' npm run seed:team
  *   TEAM_PASSWORD='...' npm run seed:team -- --dry-run
  *   TEAM_PASSWORD='...' npm run seed:team -- --prune     leave only this team active
+ *   TEAM_PASSWORD='...' npm run seed:team -- --allow-weak-password   trial only
  *
  * Why a script rather than pasting documents into Atlas:
  *
@@ -35,8 +36,9 @@ import { ROLES, DISTRIBUTION_STRATEGY } from '../src/config/constants.js';
 
 const DRY_RUN = process.argv.includes('--dry-run');
 const PRUNE = process.argv.includes('--prune');
+const ALLOW_WEAK = process.argv.includes('--allow-weak-password');
 const PASSWORD = process.env.TEAM_PASSWORD ?? '';
-const DOMAIN = process.env.TEAM_DOMAIN ?? 'tamkeentraining.com';
+const DOMAIN = process.env.TEAM_DOMAIN ?? 'tamkeentrainingcrm.com';
 
 /** The two branches these people belong to, created only if missing. */
 const BRANCHES = [
@@ -71,23 +73,27 @@ const TITLES = Object.freeze({
  * `local` becomes the part of the address before the @, and `name` is the bare
  * personal name — the title above is prefixed when the account is written.
  *
- * There are two people called Ahmed, so the administrator holds the plain
- * `ahmed` address and the media buyer is qualified by role. Change either in
- * this list and re-run if you would rather they were the other way round.
+ * Every address carries the role, so an administrator reading a stray address
+ * in a log or an invitation knows the access behind it without a lookup. The
+ * courtesy title leads (`mr.ali`) because that is how it is read aloud, while
+ * a job title follows the name (`ragab.sales`) for the same reason.
+ *
+ * This also settles the two people called Ahmed: `mr.ahmed` is the
+ * administrator and `ahmed.media` the media buyer, with nothing to collide.
  */
 const TEAM = [
-  { local: 'ali', name: 'علي', role: ROLES.ADMIN, branch: null },
-  { local: 'mahmoud', name: 'محمود', role: ROLES.ADMIN, branch: null },
-  { local: 'ahmed', name: 'أحمد', role: ROLES.ADMIN, branch: null },
+  { local: 'mr.ali', name: 'علي', role: ROLES.ADMIN, branch: null },
+  { local: 'mr.mahmoud', name: 'محمود', role: ROLES.ADMIN, branch: null },
+  { local: 'mr.ahmed', name: 'أحمد', role: ROLES.ADMIN, branch: null },
 
-  { local: 'islam', name: 'إسلام', role: ROLES.TEAM_LEADER, branch: 'dubai' },
-  { local: 'waad', name: 'وعد', role: ROLES.TEAM_LEADER, branch: 'ajman' },
+  { local: 'islam.teamleader', name: 'إسلام', role: ROLES.TEAM_LEADER, branch: 'dubai' },
+  { local: 'waad.teamleader', name: 'وعد', role: ROLES.TEAM_LEADER, branch: 'ajman' },
 
-  { local: 'mariam', name: 'مريم', role: ROLES.MEDIA_BUYER, branch: 'ajman' },
+  { local: 'mariam.media', name: 'مريم', role: ROLES.MEDIA_BUYER, branch: 'ajman' },
   { local: 'ahmed.media', name: 'أحمد', role: ROLES.MEDIA_BUYER, branch: 'dubai' },
 
-  { local: 'ragab', name: 'رجب', role: ROLES.AGENT, branch: 'ajman' },
-  { local: 'sherif', name: 'شريف', role: ROLES.AGENT, branch: 'dubai' },
+  { local: 'ragab.sales', name: 'رجب', role: ROLES.AGENT, branch: 'ajman' },
+  { local: 'sherif.sales', name: 'شريف', role: ROLES.AGENT, branch: 'dubai' },
 ];
 
 /** The same rule the admin-creation script applies. */
@@ -115,10 +121,28 @@ async function main() {
     process.exit(1);
   }
 
+  // A weak password is a deliberate, visible choice, never an accident: the
+  // strength rule stands unless this run asks for it to be waived, and a run
+  // that waives it says so loudly enough that nobody reaches live data
+  // believing the accounts are protected.
   const problems = passwordProblems(PASSWORD);
   if (problems.length > 0) {
-    logger.error(`TEAM_PASSWORD is too weak — it must have ${problems.join(', ')}`);
-    process.exit(1);
+    if (!ALLOW_WEAK) {
+      logger.error(`TEAM_PASSWORD is too weak — it must have ${problems.join(', ')}`);
+      console.error(
+        '\nThis is intended for a trial run with invented data. If that is what this is,\n' +
+          'repeat the command with --allow-weak-password.\n',
+      );
+      process.exit(1);
+    }
+    logger.warn('');
+    logger.warn('*'.repeat(72));
+    logger.warn(`WEAK PASSWORD ACCEPTED — it lacks ${problems.join(', ')}`);
+    logger.warn('The system is on a public address. Anyone who learns one address can');
+    logger.warn('guess this password. Acceptable only while every lead on it is invented.');
+    logger.warn('Before the first real customer: have everyone change it from Settings.');
+    logger.warn('*'.repeat(72));
+    logger.warn('');
   }
 
   await connectDatabase();

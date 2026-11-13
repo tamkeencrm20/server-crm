@@ -38,7 +38,7 @@ const DRY_RUN = process.argv.includes('--dry-run');
 const PRUNE = process.argv.includes('--prune');
 const ALLOW_WEAK = process.argv.includes('--allow-weak-password');
 const PASSWORD = process.env.TEAM_PASSWORD ?? '';
-const DOMAIN = process.env.TEAM_DOMAIN ?? 'tamkeentrainingcrm.com';
+const DOMAIN = process.env.TEAM_DOMAIN ?? 'tamkentrainingcrm.com';
 
 /** The two branches these people belong to, created only if missing. */
 const BRANCHES = [

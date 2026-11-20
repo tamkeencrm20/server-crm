@@ -168,3 +168,34 @@ export const IMPORT_MAX_ROWS = 5000;
 export const DEFAULT_COUNTRY_CODE = '971';
 export const DEFAULT_TIMEZONE = 'Asia/Dubai';
 export const DEFAULT_CURRENCY = 'AED';
+
+/**
+ * Why a lead arrived incomplete.
+ *
+ * Deliberately a field of its own rather than another LEAD_STATUS. The
+ * pipeline statuses answer "how far has the sale got", and a lead that is
+ * missing a phone number has not entered the pipeline at all — folding the two
+ * together would put these records into every funnel report and force a
+ * transition rule for a state no agent can move out of. This way the lead sits
+ * in the unassigned queue as a normal `new` lead, flagged for a human to fix.
+ */
+export const LEAD_DATA_ISSUE = Object.freeze({
+  PHONE_MISSING: 'phone_missing',
+});
+
+export const LEAD_DATA_ISSUE_VALUES = Object.values(LEAD_DATA_ISSUE);
+
+/** How far an inbound webhook event got. */
+export const WEBHOOK_EVENT_STATUS = Object.freeze({
+  RECEIVED: 'received',
+  PROCESSED: 'processed',
+  FAILED: 'failed',
+});
+
+export const WEBHOOK_EVENT_STATUS_VALUES = Object.values(WEBHOOK_EVENT_STATUS);
+
+/** Graph API error code for an expired, revoked or invalid access token. */
+export const META_AUTH_ERROR_CODE = 190;
+
+/** How many times the retry job will re-attempt one failed event. */
+export const WEBHOOK_MAX_ATTEMPTS = 8;

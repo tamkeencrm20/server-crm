@@ -5,6 +5,7 @@ import {
   LEAD_STATUS_VALUES,
   LEAD_SOURCE,
   LEAD_SOURCE_VALUES,
+  LEAD_DATA_ISSUE_VALUES,
   TERMINAL_STATUSES,
   DEFAULT_CURRENCY,
 } from '../config/constants.js';
@@ -22,9 +23,44 @@ const leadSchema = new mongoose.Schema(
   {
     // --- Identity -----------------------------------------------------
     fullName: { type: String, required: true, trim: true },
-    // Stored normalised (971501234567) so duplicates actually collide.
-    phone: { type: String, required: true, trim: true, set: normalizePhone, index: true },
+    /**
+     * Stored normalised (971501234567) so duplicates actually collide.
+     *
+     * Required only while the lead is not flagged with a data issue. A form
+     * that reaches us without a usable number is a real person who filled in
+     * a real ad, and refusing to store them lost them for good — the network
+     * has already been told the delivery succeeded and never sends it again.
+     * Better an incomplete record somebody can look at than none.
+     */
+    phone: {
+      type: String,
+      trim: true,
+      set: normalizePhone,
+      index: true,
+      required: [
+        function requiredUnlessFlagged() {
+          return !this.dataIssue;
+        },
+        'A lead needs a phone number unless it is flagged with a data issue',
+      ],
+    },
     email: { type: String, trim: true, lowercase: true },
+
+    /**
+     * Why this lead arrived incomplete, if it did. Separate from `status`,
+     * which tracks the sale: see LEAD_DATA_ISSUE for the reasoning.
+     */
+    dataIssue: { type: String, enum: LEAD_DATA_ISSUE_VALUES, index: true },
+
+    /**
+     * A delivery from a platform's lead-ads testing tool. Stored so the media
+     * buyer can prove the integration works, excluded from distribution and
+     * from the reports so it never reaches an agent or skews a number.
+     */
+    isTest: { type: Boolean, default: false, index: true },
+
+    /** The country the person said they were in, when the form asked. */
+    countryRaw: { type: String, trim: true },
 
     // --- Interest -----------------------------------------------------
     course: { type: mongoose.Schema.Types.ObjectId, ref: 'Course', index: true },

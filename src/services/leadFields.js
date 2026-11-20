@@ -10,19 +10,108 @@
  */
 import Branch from '../models/Branch.js';
 import Course from '../models/Course.js';
+import { toWesternDigits } from '../utils/phone.js';
 
 /**
- * Substring-matched, case-insensitive. Order matters: earlier aliases win, so
- * put the exact platform field names first and the loose human phrasings last.
+ * Field names reach us in whatever shape the marketer typed into the form
+ * builder, and the platforms slugify them differently: Meta turns the question
+ * "رقم الهاتف" into the field name `رقم_الهاتف`, and "اي برنامج ترغب في
+ * الاستفسار عنه؟" keeps its question mark. normalizeKey flattens all of that
+ * so one alias list covers every form, in either language, on all three
+ * networks — rather than a per-campaign mapping table that goes stale the
+ * first time someone edits an ad.
+ *
+ * @param {string} name
+ * @returns {string}
+ */
+export function normalizeKey(name) {
+  return String(name ?? '')
+    .toLowerCase()
+    // Separators the platforms use between words.
+    .replace(/[_\-/\\.]+/g, ' ')
+    // Punctuation that carries no meaning here, Arabic question mark included.
+    .replace(/[?؟!:;,()[\]{}"'`*#]+/g, ' ')
+    // Arabic diacritics and the tatweel stretching character.
+    .replace(/[ً-ْـ]/g, '')
+    // Spelling variants of the same letter, so "الأسم" matches "الاسم".
+    .replace(/[أإآٱ]/g, 'ا')
+    .replace(/ى/g, 'ي')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Order matters: earlier aliases win, so the exact field names the platforms
+ * generate come first and the loose human phrasings last.
+ *
+ * A purely ASCII alias is matched on word boundaries, never as a bare
+ * substring — otherwise `tel` claims "hotel management course" as a phone
+ * number. Arabic aliases fall back to substring matching, which is what they
+ * need: `رقم` has to find `رقم الهاتف`.
  */
 export const FIELD_ALIASES = Object.freeze({
-  fullName: ['full_name', 'name', 'الاسم', 'اسم', 'first_name'],
-  email: ['email', 'بريد', 'ايميل', 'الايميل'],
-  phone: ['phone_number', 'phone', 'mobile', 'whatsapp', 'tel', 'هاتف', 'جوال', 'رقم', 'موبايل'],
-  course: ['course', 'program', 'training', 'دورة', 'الدورة', 'برنامج', 'تدريب', 'التخصص'],
-  branch: ['branch', 'city', 'location', 'emirate', 'فرع', 'الفرع', 'مدينة', 'المدينة', 'امارة'],
-  company: ['company', 'organization', 'جهة', 'شركة'],
+  fullName: [
+    'full name', 'name', 'first name', 'last name',
+    'الاسم بالكامل', 'الاسم الكامل', 'الاسم', 'اسم',
+  ],
+  email: ['email', 'e mail', 'البريد الالكتروني', 'بريد', 'ايميل'],
+  phone: [
+    'phone number', 'phone', 'mobile number', 'mobile', 'whatsapp', 'tel',
+    'رقم الهاتف', 'رقم الجوال', 'رقم الموبايل', 'رقم التواصل', 'هاتف', 'جوال',
+    'موبايل', 'واتساب', 'رقم',
+  ],
+  course: [
+    'course', 'program', 'programme', 'training', 'specialization',
+    'الدورة', 'دورة', 'البرنامج', 'برنامج', 'تدريب', 'التخصص', 'تخصص',
+  ],
+  branch: [
+    'branch', 'city', 'emirate', 'location',
+    'الفرع', 'فرع', 'المدينة', 'مدينة', 'الامارة', 'امارة',
+  ],
+  company: ['company', 'organization', 'employer', 'جهة العمل', 'جهة', 'شركة'],
+  /**
+   * Read only so that it never reaches the branch field. The new Ajman form
+   * asks "من اي دولة انت/انتِ", and a country is not a branch: answering
+   * "السعودية" must not route the lead to a UAE city by accident. It is kept
+   * with the raw answers for the agent to read.
+   */
+  country: ['country', 'nationality', 'الدولة', 'دولة', 'البلد', 'بلد', 'الجنسية'],
 });
+
+const ASCII_ONLY = /^[\x20-\x7e]+$/;
+
+/** Pre-compiled matchers, built once rather than per lead. */
+const ALIAS_MATCHERS = Object.freeze(
+  Object.fromEntries(
+    Object.entries(FIELD_ALIASES).map(([field, aliases]) => [
+      field,
+      aliases.map((raw) => {
+        const alias = normalizeKey(raw);
+        return {
+          alias,
+          test: ASCII_ONLY.test(alias)
+            ? (key) => new RegExp(`\\b${alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(key)
+            : (key) => key.includes(alias),
+        };
+      }),
+    ]),
+  ),
+);
+
+/**
+ * The Lead Ads Testing Tool fills every answer with a placeholder rather than
+ * real data — "<test lead: dummy data for phone_number>". Those leads must
+ * still be stored, so the media buyer can see the plumbing works end to end,
+ * but they must never reach an agent's call list.
+ *
+ * @param {string} value
+ * @returns {boolean}
+ */
+export function isTestValue(value) {
+  const v = String(value ?? '').trim();
+  if (!v) return false;
+  return /^<.*>$/.test(v) && /test\s*lead|dummy\s*data/i.test(v);
+}
 
 /**
  * Normalise any platform's answer list into a flat { key: value } map.
@@ -39,34 +128,49 @@ export function flattenAnswers(answers) {
   if (Array.isArray(answers)) {
     for (const item of answers) {
       if (!item || typeof item !== 'object') continue;
-      const key = String(item.name ?? item.field_name ?? item.question ?? item.key ?? '').toLowerCase().trim();
+      const key = normalizeKey(item.name ?? item.field_name ?? item.question ?? item.key ?? '');
       if (!key) continue;
       const raw = item.values ?? item.field_value ?? item.answer ?? item.value ?? '';
-      flat[key] = Array.isArray(raw) ? raw.join(', ') : String(raw ?? '');
+      flat[key] = (Array.isArray(raw) ? raw.join(', ') : String(raw ?? '')).trim();
     }
     return flat;
   }
 
   if (typeof answers === 'object') {
     for (const [k, v] of Object.entries(answers)) {
-      const key = String(k).toLowerCase().trim();
+      const key = normalizeKey(k);
       if (!key) continue;
-      flat[key] = Array.isArray(v) ? v.join(', ') : String(v ?? '');
+      flat[key] = (Array.isArray(v) ? v.join(', ') : String(v ?? '')).trim();
     }
   }
 
   return flat;
 }
 
-/** Read one logical field out of the flat map using its alias list. */
-export function readField(flat, aliases) {
-  for (const alias of aliases) {
-    // Exact match first, so "name" does not lose to "company_name".
+/**
+ * Read one logical field out of the flat map.
+ *
+ * Every alias is tried as an exact key before any is tried as a partial one,
+ * so an exactly-named `name` field always beats a `company_name` that merely
+ * contains it. A key that is present but empty is skipped rather than
+ * returned, which is what lets a form carrying both `phone_number` (blank)
+ * and `رقم_الهاتف` (filled) still produce a phone number.
+ *
+ * @param {Record<string,string>} flat
+ * @param {string} field  a key of FIELD_ALIASES
+ * @returns {string}
+ */
+export function readField(flat, field) {
+  const matchers = ALIAS_MATCHERS[field];
+  if (!matchers) throw new Error(`Unknown lead field: ${field}`);
+
+  for (const { alias } of matchers) {
     if (flat[alias]) return flat[alias];
   }
-  for (const alias of aliases) {
-    const hit = Object.keys(flat).find((k) => k.includes(alias));
-    if (hit && flat[hit]) return flat[hit];
+  for (const { test } of matchers) {
+    for (const key of Object.keys(flat)) {
+      if (flat[key] && test(key)) return flat[key];
+    }
   }
   return '';
 }
@@ -121,22 +225,33 @@ export async function resolveCourse(rawCourse) {
 export async function extractLeadIdentity(answers) {
   const flat = flattenAnswers(answers);
 
-  const fullName = readField(flat, FIELD_ALIASES.fullName) || 'Unnamed lead';
-  const phone = readField(flat, FIELD_ALIASES.phone);
-  const email = readField(flat, FIELD_ALIASES.email);
-  const courseRaw = readField(flat, FIELD_ALIASES.course);
-  const branchRaw = readField(flat, FIELD_ALIASES.branch);
+  // A test delivery has placeholders in place of answers. Spotting it here,
+  // before anything is validated, is what keeps it from being thrown away as
+  // a malformed lead.
+  const isTest = Object.values(flat).some(isTestValue);
+  const real = (value) => (isTestValue(value) ? '' : value);
+
+  const fullName = real(readField(flat, 'fullName'));
+  const phone = real(readField(flat, 'phone'));
+  const email = real(readField(flat, 'email'));
+  const courseRaw = real(readField(flat, 'course'));
+  const branchRaw = real(readField(flat, 'branch'));
+  const countryRaw = real(readField(flat, 'country'));
 
   const [branch, course] = await Promise.all([resolveBranch(branchRaw), resolveCourse(courseRaw)]);
 
   return {
-    fullName,
-    phone,
+    fullName: fullName || (isTest ? 'Test lead' : 'Unnamed lead'),
+    // Arabic-Indic digits are rewritten here as well as in the model's setter:
+    // the raw value is compared and logged before it ever reaches the setter.
+    phone: toWesternDigits(phone),
     email: email || undefined,
     courseRaw: courseRaw || undefined,
     branchRaw: branchRaw || undefined,
+    countryRaw: countryRaw || undefined,
     course: course?._id,
     branch: branch?._id,
+    isTest,
     flat,
   };
 }

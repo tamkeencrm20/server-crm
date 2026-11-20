@@ -9,10 +9,31 @@ import { DEFAULT_COUNTRY_CODE } from '../config/constants.js';
  * @param {string} input
  * @returns {string} digits only, or '' when nothing usable was given
  */
+/**
+ * Rewrite Arabic-Indic digits as the Western ones JavaScript can read.
+ *
+ * A phone typed on an Arabic keyboard arrives as ٠٥٠١٢٣٤٥٦٧٨, and `\D`
+ * treats every one of those as a non-digit — so the number was stripped down
+ * to nothing and the lead was rejected for having no phone at all. Both the
+ * Arabic-Indic block (U+0660) and the Extended Arabic-Indic block (U+06F0)
+ * used by Persian and Urdu keyboards are handled.
+ *
+ * @param {string} input
+ * @returns {string}
+ */
+export function toWesternDigits(input) {
+  if (input === null || input === undefined) return '';
+  return String(input).replace(/[٠-٩۰-۹]/g, (ch) => {
+    const code = ch.charCodeAt(0);
+    const base = code >= 0x06f0 ? 0x06f0 : 0x0660;
+    return String(code - base);
+  });
+}
+
 export function normalizePhone(input) {
   if (!input) return '';
 
-  let digits = String(input).replace(/\D/g, '');
+  let digits = toWesternDigits(input).replace(/\D/g, '');
   if (!digits) return '';
 
   // 00971... -> 971...

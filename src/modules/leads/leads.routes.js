@@ -13,6 +13,7 @@ import {
   LEAD_SOURCE,
   LEAD_SOURCE_VALUES,
   LEAD_STATUS_VALUES,
+  LEAD_DATA_ISSUE_VALUES,
   ROLES,
   TERMINAL_STATUSES,
 } from '../../config/constants.js';
@@ -67,6 +68,9 @@ const listQuerySchema = z.object({
   from: z.coerce.date().optional(),
   to: z.coerce.date().optional(),
   followUpDue: z.enum(['true', 'false']).optional(),
+  // Leads that arrived incomplete, and leads from a platform's testing tool.
+  dataIssue: z.enum([...LEAD_DATA_ISSUE_VALUES, 'any']).optional(),
+  isTest: z.enum(['true', 'false']).optional(),
   open: z.enum(['true', 'false']).optional(),
   sort: z.enum(['newest', 'oldest', 'activity', 'followup']).default('newest'),
   page: z.coerce.number().int().min(1).default(1),
@@ -105,6 +109,12 @@ function buildLeadFilter(req, p) {
       filter.assignedTo = p.assignedTo;
     }
   }
+
+  if (p.dataIssue) filter.dataIssue = p.dataIssue === 'any' ? { $ne: null } : p.dataIssue;
+
+  // Test leads are noise in every normal view, so they are hidden unless
+  // asked for by name — the media buyer checking their own test delivery.
+  filter.isTest = p.isTest === 'true' ? true : { $ne: true };
 
   if (p.open === 'true') filter.status = { $nin: TERMINAL_STATUSES };
   if (p.open === 'false') filter.status = { $in: TERMINAL_STATUSES };

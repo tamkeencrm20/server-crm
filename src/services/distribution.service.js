@@ -321,7 +321,17 @@ export async function reassignLead(lead, agentId, actor) {
  * @param {number} [limit]
  */
 export async function distributeUnassigned(filter = {}, limit = 200) {
-  const leads = await Lead.find({ assignedTo: null, isDuplicate: false, ...filter })
+  // A lead with no usable phone number, or one the testing tool invented,
+  // stays in the queue on purpose: handing it to an agent gives them someone
+  // they cannot call. The sweep runs every ten minutes, so without this the
+  // flagged leads would be distributed within minutes of arriving.
+  const leads = await Lead.find({
+    assignedTo: null,
+    isDuplicate: false,
+    isTest: { $ne: true },
+    dataIssue: null,
+    ...filter,
+  })
     .sort({ createdAt: 1 })
     .limit(limit);
 

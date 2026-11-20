@@ -7,6 +7,7 @@ import Notification from '../models/Notification.js';
 import { TERMINAL_STATUSES, LEAD_STATUS, NOTIFICATION_TYPE, DEFAULT_TIMEZONE } from '../config/constants.js';
 import { notifyFollowUpDue, notifyLeadStale } from '../services/notification.service.js';
 import { distributeUnassigned } from '../services/distribution.service.js';
+import { retryFailedEvents } from '../modules/meta/meta.routes.js';
 
 /**
  * The scheduled half of the automation. Everything here is idempotent — a job
@@ -90,6 +91,21 @@ async function retryUnassigned() {
   return result;
 }
 
+/**
+ * Re-attempt the Meta deliveries that never became leads.
+ *
+ * Meta is told 200 before the lead is fetched and never resends, so a token
+ * that expired overnight would otherwise cost every lead until someone
+ * noticed. This picks them up on its own once the token is fixed.
+ */
+async function retryFailedMetaEvents() {
+  const result = await retryFailedEvents();
+  if (result.recovered > 0) {
+    logger.info(`Meta retry sweep: ${result.recovered}/${result.total} recovered`);
+  }
+  return result;
+}
+
 export function startJobs() {
   if (!env.ENABLE_CRON) {
     logger.warn('Scheduled jobs are disabled (ENABLE_CRON=false)');
@@ -100,10 +116,11 @@ export function startJobs() {
     cron.schedule('*/15 * * * *', () => followUpReminders().catch((e) => logger.error('followUpReminders failed', e)), tz),
     cron.schedule('0 * * * *', () => staleLeadAlerts().catch((e) => logger.error('staleLeadAlerts failed', e)), tz),
     cron.schedule('*/10 * * * *', () => retryUnassigned().catch((e) => logger.error('retryUnassigned failed', e)), tz),
+    cron.schedule('*/20 * * * *', () => retryFailedMetaEvents().catch((e) => logger.error('retryFailedMetaEvents failed', e)), tz),
   ];
 
   logger.info(`Scheduled jobs started (${tasks.length}) on ${DEFAULT_TIMEZONE}`);
   return tasks;
 }
 
-export const jobs = { followUpReminders, staleLeadAlerts, retryUnassigned };
+export const jobs = { followUpReminders, staleLeadAlerts, retryUnassigned, retryFailedMetaEvents };

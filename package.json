@@ -14,7 +14,8 @@
     "test:e2e": "node tests/e2e.mjs",
     "test:features": "node tests/features.mjs",
     "seed:demo": "node seed/demo.js",
-    "seed:team": "node seed/team.js"
+    "seed:team": "node seed/team.js",
+    "test:meta": "node tests/meta-intake.mjs"
   },
   "engines": {
     "node": ">=20"

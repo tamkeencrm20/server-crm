@@ -23,6 +23,22 @@ const schema = z.object({
   META_PAGE_ACCESS_TOKEN: z.string().optional(),
   META_GRAPH_VERSION: z.string().default('v21.0'),
 
+  /**
+   * A page access token belongs to one page, so a single token cannot fetch
+   * leads from both branches: Dubai's leads would fail with the Ajman token.
+   * JSON of {"<page_id>": "<token>"}, falling back to META_PAGE_ACCESS_TOKEN
+   * for any page not listed.
+   */
+  META_PAGE_TOKENS: z.string().optional(),
+
+  /**
+   * Which branch each Facebook page belongs to, as {"<page_id>": "<code>"}.
+   * The forms do not all ask which branch the person wants — and must not,
+   * since the Ajman form asks for a country instead — so the page the lead
+   * came from is the reliable answer.
+   */
+  META_PAGE_BRANCHES: z.string().optional(),
+
   // TikTok Lead Generation — optional until the Business account is wired up.
   TIKTOK_APP_SECRET: z.string().optional(),
   TIKTOK_VERIFY_TOKEN: z.string().optional(),
@@ -56,11 +72,37 @@ if (!parsed.success) {
 
 const raw = parsed.data;
 
+/**
+ * Parse a JSON map from the environment.
+ *
+ * A malformed value here must not take the server down — the rest of the CRM
+ * works fine without it, and a hard exit on a mistyped brace would turn a
+ * webhook misconfiguration into an outage. It is logged loudly and treated as
+ * absent instead.
+ */
+function jsonMap(value, name) {
+  if (!value) return {};
+  try {
+    const parsedValue = JSON.parse(value);
+    if (!parsedValue || typeof parsedValue !== 'object' || Array.isArray(parsedValue)) {
+      throw new Error('expected a JSON object');
+    }
+    return Object.fromEntries(
+      Object.entries(parsedValue).map(([k, v]) => [String(k).trim(), String(v).trim()]),
+    );
+  } catch (err) {
+    console.error(`${name} is not valid JSON and will be ignored: ${err.message}`);
+    return {};
+  }
+}
+
 export const env = Object.freeze({
   ...raw,
   isProd: raw.NODE_ENV === 'production',
   isDev: raw.NODE_ENV === 'development',
   corsOrigins: raw.CORS_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean),
+  metaPageTokens: jsonMap(raw.META_PAGE_TOKENS, 'META_PAGE_TOKENS'),
+  metaPageBranches: jsonMap(raw.META_PAGE_BRANCHES, 'META_PAGE_BRANCHES'),
   metaConfigured: Boolean(raw.META_APP_SECRET && raw.META_VERIFY_TOKEN),
   tiktokConfigured: Boolean(raw.TIKTOK_APP_SECRET && raw.TIKTOK_VERIFY_TOKEN),
   snapchatConfigured: Boolean(raw.SNAPCHAT_APP_SECRET && raw.SNAPCHAT_VERIFY_TOKEN),

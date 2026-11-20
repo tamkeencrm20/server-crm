@@ -95,8 +95,13 @@ export async function intakeLead(draft, { autoAssign = true, createdBy, throwOnD
     isSystem: !createdBy,
   });
 
+  // An incomplete or synthetic lead is stored, but never handed to anyone:
+  // an agent cannot phone a missing number, and a testing-tool lead is not a
+  // customer at all. Both wait in the unassigned queue for a human.
+  const deliverable = !lead.dataIssue && !lead.isTest;
+
   let assignment = null;
-  if (autoAssign) {
+  if (autoAssign && deliverable) {
     assignment = await assignLead(lead, { notify });
   }
 

@@ -81,6 +81,16 @@ export function createApp() {
         status: 'ok',
         env: env.NODE_ENV,
         metaConfigured: env.metaConfigured,
+        /**
+         * How many Facebook pages are mapped to a branch, and how many have
+         * their own token. Counts only — no id, no secret, nothing a caller
+         * could use. They are here because the platforms screen shows nothing
+         * at all when a page map is missing, and that silence reads exactly
+         * like a server that was never redeployed. One unauthenticated number
+         * tells the two apart.
+         */
+        metaPagesMapped: Object.keys(env.metaPageBranches).length,
+        metaPageTokens: Object.keys(env.metaPageTokens).length,
         time: new Date().toISOString(),
       },
     });

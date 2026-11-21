@@ -63,10 +63,30 @@ export async function intakeLead(draft, { autoAssign = true, createdBy, throwOnD
 
   if (existing) {
     if (throwOnDuplicate) {
-      throw conflict('A lead with this phone number already exists', {
-        code: 'DUPLICATE_LEAD',
-        details: { leadId: String(existing._id), assignedTo: existing.assignedTo },
-      });
+      // Name the colleague who already has this person. "Duplicate" on its own
+      // leaves the next question unanswered — whether to drop it or go and ask
+      // someone — and two agents calling the same lead is how a centre loses
+      // one. Falling back to the bare message keeps the failure useful even if
+      // the lookup cannot resolve a name.
+      const owner = existing.assignedTo
+        ? await User.findById(existing.assignedTo).select('name').lean()
+        : null;
+
+      throw conflict(
+        owner
+          ? `This phone number already belongs to a lead handled by ${owner.name}`
+          : 'This phone number already belongs to a lead waiting in the unassigned queue',
+        {
+          code: 'DUPLICATE_LEAD',
+          details: {
+            leadId: String(existing._id),
+            assignedTo: existing.assignedTo ? String(existing.assignedTo) : null,
+            assignedToName: owner?.name ?? null,
+            status: existing.status,
+            createdAt: existing.createdAt,
+          },
+        },
+      );
     }
 
     // Record the repeat enquiry on the original lead instead of creating a

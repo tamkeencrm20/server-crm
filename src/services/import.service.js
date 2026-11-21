@@ -183,7 +183,21 @@ export async function importLeads(rows, { user, branch: requestedBranch, dryRun 
       );
 
       if (duplicate) {
-        results.push({ row: rowNumber, status: IMPORT_ROW_STATUS.DUPLICATE, reason: 'Already in the CRM', name: fullName, leadId: lead._id });
+        // Say who has it. A row marked only "duplicate" tells the uploader
+        // nothing they can act on; the owner's name turns it into a decision.
+        const owner = lead.assignedTo
+          ? await User.findById(lead.assignedTo).select('name').lean()
+          : null;
+        results.push({
+          row: rowNumber,
+          status: IMPORT_ROW_STATUS.DUPLICATE,
+          // Kept verbatim: the browser maps this exact string to a translated
+          // label. The owner travels beside it rather than inside it.
+          reason: 'Already in the CRM',
+          name: fullName,
+          leadId: lead._id,
+          assignedToName: owner?.name ?? null,
+        });
         summary.duplicate += 1;
       } else {
         // The note column becomes a real timeline entry; Lead has no note field.

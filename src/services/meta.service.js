@@ -181,7 +181,7 @@ export async function fetchLeadFromGraph(leadgenId, { pageId } = {}) {
  */
 export async function mapGraphLeadToDraft(graphLead, envelope = {}) {
   const identity = await extractLeadIdentity(graphLead.field_data);
-  const { flat, isTest, ...fields } = identity;
+  const { flat, answers, isTest, ...fields } = identity;
 
   const platform = (graphLead.platform ?? envelope.platform ?? '').toLowerCase();
   const source = platform.startsWith('ig') ? LEAD_SOURCE.META_INSTAGRAM : LEAD_SOURCE.META_FACEBOOK;
@@ -205,7 +205,7 @@ export async function mapGraphLeadToDraft(graphLead, envelope = {}) {
       adsetName: graphLead.adset_name,
       platform: platform || undefined,
       createdTime: graphLead.created_time ? new Date(graphLead.created_time) : new Date(),
-      rawFields: flat,
+      rawFields: answers,
     },
   };
 }

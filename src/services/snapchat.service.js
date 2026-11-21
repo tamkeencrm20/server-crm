@@ -122,7 +122,7 @@ export async function mapLeadToDraft(lead = {}, envelope = {}) {
       adsetId: lead.ad_squad_id,
       adsetName: lead.ad_squad_name,
       createdTime: createdRaw ? new Date(createdRaw) : new Date(),
-      rawFields: identity.flat,
+      rawFields: identity.answers,
     },
   };
 }

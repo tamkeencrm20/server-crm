@@ -148,6 +148,41 @@ export function flattenAnswers(answers) {
 }
 
 /**
+ * The same answers, keyed by the question exactly as it was asked.
+ *
+ * flattenAnswers normalises keys so that matching works, which is right for
+ * matching and wrong for reading: "من اي دولة انت/انتِ" comes out as
+ * "من اي دولة انت انت", with the slash and the kasra gone. The agent should
+ * see the question the person saw, so the display copy keeps the original
+ * text and only the matching copy is normalised.
+ *
+ * @param {any} answers
+ * @returns {Record<string,string>}
+ */
+export function labelledAnswers(answers) {
+  const out = {};
+  if (!answers) return out;
+
+  const entries = Array.isArray(answers)
+    ? answers
+        .filter((item) => item && typeof item === 'object')
+        .map((item) => [
+          String(item.name ?? item.field_name ?? item.question ?? item.key ?? '').trim(),
+          item.values ?? item.field_value ?? item.answer ?? item.value ?? '',
+        ])
+    : Object.entries(answers);
+
+  for (const [label, raw] of entries) {
+    if (!label) continue;
+    // Underscores are the platform's doing, not the marketer's: Meta turns
+    // "رقم الهاتف" into "رقم_الهاتف". Spaces read the way the form did.
+    const question = label.replace(/_+/g, ' ').trim();
+    out[question] = (Array.isArray(raw) ? raw.join(', ') : String(raw ?? '')).trim();
+  }
+  return out;
+}
+
+/**
  * Read one logical field out of the flat map.
  *
  * Every alias is tried as an exact key before any is tried as a partial one,
@@ -241,6 +276,8 @@ export async function extractLeadIdentity(answers) {
   const [branch, course] = await Promise.all([resolveBranch(branchRaw), resolveCourse(courseRaw)]);
 
   return {
+    // Keyed by the question as asked, for the agent to read.
+    answers: labelledAnswers(answers),
     fullName: fullName || (isTest ? 'Test lead' : 'Unnamed lead'),
     // Arabic-Indic digits are rewritten here as well as in the model's setter:
     // the raw value is compared and logged before it ever reaches the setter.

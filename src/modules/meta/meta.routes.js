@@ -220,11 +220,18 @@ export async function ingestEvent(event, { fieldData } = {}) {
 async function resolveLeadBranch(draft, pageId) {
   if (draft.branch) return draft.branch;
 
-  const code = branchCodeForPage(pageId);
-  if (code) {
-    const branch = await Branch.findOne({ code, isActive: true }).select('_id').lean();
+  const label = branchCodeForPage(pageId);
+  if (label) {
+    // Matched the same way a form answer is: by code, by name or by city, in
+    // either language. Whoever fills in META_PAGE_BRANCHES is reading a page
+    // name off Facebook and writing the branch they mean — "عجمان" and
+    // "ajman" are the same answer, and demanding the internal code would turn
+    // a reasonable entry into leads that silently arrive with no branch.
+    const branch = await resolveBranch(label);
     if (branch) return branch._id;
-    logger.warn(`META_PAGE_BRANCHES maps page ${pageId} to "${code}", which is not an active branch`);
+    logger.warn(
+      `META_PAGE_BRANCHES maps page ${pageId} to "${label}", which matches no active branch`,
+    );
   }
 
   const active = await Branch.find({ isActive: true }).select('_id').limit(2).lean();

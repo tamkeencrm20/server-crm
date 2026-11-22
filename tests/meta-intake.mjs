@@ -18,6 +18,9 @@ const API = process.env.API_URL ?? 'http://localhost:5000';
 const PASSWORD = process.env.TEAM_PASSWORD ?? process.env.SEED_PASSWORD ?? '12341234';
 const ADMIN = process.env.TEST_ADMIN ?? 'mr.ali@tamkentrainingcrm.com';
 const SECRET = process.env.META_APP_SECRET;
+// The second app's secret. Each branch has its own Facebook app, and a
+// delivery is signed by whichever one sent it.
+const DUBAI_SECRET = process.env.META_DUBAI_APP_SECRET ?? process.env.META_APP_SECRET;
 
 const AJMAN_PAGE = '258263244046358';
 const DUBAI_PAGE = '463814543488570';
@@ -59,13 +62,13 @@ async function call(token, method, path, body) {
 }
 
 /** Post a webhook signed the way Meta signs it. */
-async function deliver(value, pageId = AJMAN_PAGE) {
+async function deliver(value, pageId = AJMAN_PAGE, secret = SECRET) {
   const payload = {
     object: 'page',
     entry: [{ id: pageId, time: Date.now(), changes: [{ field: 'leadgen', value }] }],
   };
   const raw = JSON.stringify(payload);
-  const sig = crypto.createHmac('sha256', SECRET).update(raw).digest('hex');
+  const sig = crypto.createHmac('sha256', secret).update(raw).digest('hex');
   const res = await fetch(`${API}/api/meta/webhook`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-hub-signature-256': `sha256=${sig}` },
@@ -201,6 +204,7 @@ const run = async () => {
         ],
       },
       DUBAI_PAGE,
+      DUBAI_SECRET,
     );
 
     const { lead } = await findLead(t, leadgenId);
@@ -260,6 +264,59 @@ const run = async () => {
     const leads = await call(t, 'GET', `/leads?search=${encodeURIComponent(repeatName)}&limit=50`);
     const mine = (leads.body?.data ?? []).filter((l) => l.fullName === repeatName);
     check('and exactly one lead', mine.length === 1, `${mine.length} leads`);
+  }
+
+  // -------------------------------------------------------------------------
+  section('8 · Two Facebook apps posting to one webhook');
+  {
+    // Signed by the Dubai app. Nothing in the request names the app — the
+    // page id lives in the body, which cannot be trusted before the signature
+    // is checked — so the server has to find the matching secret by trying
+    // each configured one.
+    const dubaiId = id('dubaiapp');
+    const status = await deliver(
+      {
+        leadgen_id: dubaiId,
+        page_id: DUBAI_PAGE,
+        field_data: [
+          field('full_name', 'Dubai App Lead'),
+          field('phone_number', `+9715022${stamp.slice(-5)}`),
+        ],
+      },
+      DUBAI_PAGE,
+      DUBAI_SECRET,
+    );
+    check("the Dubai app's signature was accepted", status === 200, String(status));
+
+    const dubai = await findLead(t, dubaiId);
+    check('the delivery was processed', dubai.event?.status === 'processed', dubai.event?.lastError);
+    check('and it landed in Dubai', dubai.lead?.branch?.code === 'dubai', dubai.lead?.branch?.code);
+
+    // Ajman's app has to keep working alongside it.
+    const ajmanId = id('ajmanstill');
+    await deliver({
+      leadgen_id: ajmanId,
+      page_id: AJMAN_PAGE,
+      field_data: [
+        field('full_name', 'Ajman Still Works'),
+        field('phone_number', `+9715011${stamp.slice(-5)}`),
+      ],
+    });
+    const ajman = await findLead(t, ajmanId);
+    check("Ajman's app still works", ajman.lead?.branch?.code === 'ajman', ajman.lead?.branch?.code);
+
+    // A signature from neither app is refused at the door.
+    const forgedId = id('forged');
+    const forged = await deliver(
+      { leadgen_id: forgedId, page_id: AJMAN_PAGE, field_data: [field('full_name', 'Forged')] },
+      AJMAN_PAGE,
+      'not-one-of-the-configured-secrets',
+    );
+    check('a wrong signature is rejected with 401', forged === 401, String(forged));
+
+    const all = await call(t, 'GET', '/meta/events?limit=200');
+    const leaked = (all.body?.data ?? []).some((e) => e.leadgenId === forgedId);
+    check('and nothing from it was stored', !leaked, 'the forged delivery was recorded');
   }
 
   console.log(`\n\x1b[1m${passed} passed, ${failed} failed\x1b[0m`);

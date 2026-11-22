@@ -19,6 +19,15 @@ const schema = z.object({
 
   // Meta Lead Ads — optional until the Business account is wired up.
   META_APP_SECRET: z.string().optional(),
+
+  /**
+   * Every app secret that may sign a delivery, as a JSON array. A second
+   * Facebook app signs with its own secret, and the webhook cannot know which
+   * app sent a request until the signature is checked — so each configured
+   * secret is tried. META_APP_SECRET stays valid and is folded in, so an
+   * existing single-app setup keeps working untouched.
+   */
+  META_APP_SECRETS: z.string().optional(),
   META_VERIFY_TOKEN: z.string().optional(),
   META_PAGE_ACCESS_TOKEN: z.string().optional(),
   META_GRAPH_VERSION: z.string().default('v21.0'),
@@ -96,14 +105,42 @@ function jsonMap(value, name) {
   }
 }
 
+/**
+ * Parse a JSON array of strings from the environment, tolerating a plain
+ * comma-separated list. Same reasoning as jsonMap: a typo here must not take
+ * the server down, and the raw editors people paste into mangle quotes.
+ */
+function jsonList(value, name) {
+  if (!value) return [];
+  const trimmed = value.trim();
+  if (trimmed.startsWith('[')) {
+    try {
+      const parsedValue = JSON.parse(trimmed);
+      if (!Array.isArray(parsedValue)) throw new Error('expected a JSON array');
+      return parsedValue.map((v) => String(v).trim()).filter(Boolean);
+    } catch (err) {
+      console.error(`${name} is not valid JSON and will be ignored: ${err.message}`);
+      return [];
+    }
+  }
+  return trimmed.split(',').map((v) => v.trim()).filter(Boolean);
+}
+
+/** Every secret a Meta delivery may legitimately be signed with. */
+function metaSecrets(raw) {
+  const all = [raw.META_APP_SECRET, ...jsonList(raw.META_APP_SECRETS, 'META_APP_SECRETS')];
+  return [...new Set(all.map((s) => (s ?? '').trim()).filter(Boolean))];
+}
+
 export const env = Object.freeze({
   ...raw,
   isProd: raw.NODE_ENV === 'production',
   isDev: raw.NODE_ENV === 'development',
   corsOrigins: raw.CORS_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean),
+  metaAppSecrets: metaSecrets(raw),
   metaPageTokens: jsonMap(raw.META_PAGE_TOKENS, 'META_PAGE_TOKENS'),
   metaPageBranches: jsonMap(raw.META_PAGE_BRANCHES, 'META_PAGE_BRANCHES'),
-  metaConfigured: Boolean(raw.META_APP_SECRET && raw.META_VERIFY_TOKEN),
+  metaConfigured: Boolean(metaSecrets(raw).length > 0 && raw.META_VERIFY_TOKEN),
   tiktokConfigured: Boolean(raw.TIKTOK_APP_SECRET && raw.TIKTOK_VERIFY_TOKEN),
   snapchatConfigured: Boolean(raw.SNAPCHAT_APP_SECRET && raw.SNAPCHAT_VERIFY_TOKEN),
 });

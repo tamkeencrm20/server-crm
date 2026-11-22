@@ -30,20 +30,36 @@ const GRAPH = 'https://graph.facebook.com';
  * @returns {boolean}
  */
 export function verifySignature(rawBody, signatureHeader) {
-  if (!env.META_APP_SECRET) {
-    logger.warn('META_APP_SECRET is not set, rejecting webhook delivery');
+  const secrets = env.metaAppSecrets;
+  if (secrets.length === 0) {
+    logger.warn('No Meta app secret is configured, rejecting webhook delivery');
     return false;
   }
   if (!signatureHeader || !signatureHeader.startsWith('sha256=')) return false;
 
-  const expected = crypto.createHmac('sha256', env.META_APP_SECRET).update(rawBody).digest('hex');
-  const received = signatureHeader.slice('sha256='.length);
+  const received = Buffer.from(signatureHeader.slice('sha256='.length), 'utf8');
 
-  const a = Buffer.from(expected, 'utf8');
-  const b = Buffer.from(received, 'utf8');
-  // timingSafeEqual throws on length mismatch, so guard first.
-  return a.length === b.length && crypto.timingSafeEqual(a, b);
+  // Each branch has its own Facebook app, and an app signs with its own
+  // secret. Nothing in the request says which app sent it — the page id is
+  // inside the body, which must not be trusted before the signature is
+  // checked — so every configured secret is tried.
+  //
+  // The loop deliberately does not stop at the first match: short-circuiting
+  // would make the response time reveal which secret matched, and the whole
+  // point of timingSafeEqual is not to leak that.
+  let matched = false;
+  for (const secret of secrets) {
+    const expected = Buffer.from(
+      crypto.createHmac('sha256', secret).update(rawBody).digest('hex'),
+      'utf8',
+    );
+    if (expected.length === received.length && crypto.timingSafeEqual(expected, received)) {
+      matched = true;
+    }
+  }
+  return matched;
 }
+
 
 /**
  * Answers Meta's GET verification handshake.
